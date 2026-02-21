@@ -1,15 +1,22 @@
 from .base import Entity
+from ..logger import logger
 
 class Town(Entity):
     def __init__(self, name: str, x: int = 0, y: int = 0):
         super().__init__(name, x, y)
-        self.resources = {"wood": 0, "food": 0}
+        self.wood_stock = 0
+        self.level = 1
+        self.level_names = {1: "Choza", 2: "Refugio", 3: "Fortaleza", 4: "Ciudadela"}
 
-    def deposit(self, resource: str, amount: int):
-        if resource in self.resources:
-            self.resources[resource] += amount
-            return True
-        return False
+    def add_wood(self, amount: int):
+        self.wood_stock += amount
+        old_level = self.level
+        if self.wood_stock >= 50: self.level = 2
+        if self.wood_stock >= 200: self.level = 3
+        if self.wood_stock >= 500: self.level = 4
+        
+        if self.level > old_level:
+            logger.log(f"🏗️ ¡{self.name} ha subido al nivel {self.level} ({self.level_names[self.level]})!")
 
     def __repr__(self):
-        return f"<Town name={self.name} resources={self.resources}>"
+        return f"<Town {self.name} Lvl:{self.level} Wood:{self.wood_stock}>"

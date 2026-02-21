@@ -1,37 +1,44 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from uuid import UUID
 import random
 from .entities.base import Entity
+from .scenarios.base import BaseScenario
 
 class WorldState:
-    """Contenedor global de un mundo extenso y procedimental."""
-    def __init__(self):
+    """Mundo cuyo comportamiento depende del escenario activo."""
+    def __init__(self, scenario: BaseScenario):
+        self.scenario = scenario
         self.entities: Dict[UUID, Entity] = {}
         self.tick_count: int = 0
-        self.decorations: Dict[tuple, str] = {}
-        self._generate_world_procedural(radius=150)
+        self.time_of_day = 12.0
+        # El escenario genera el mapa
+        self.decorations = self.scenario.generate_decorations(radius=150)
 
-    def _generate_world_procedural(self, radius: int):
-        """Genera un mundo de 300x300 celdas con decoraciones variadas."""
-        for _ in range(500):
-            x = random.randint(-radius, radius)
-            y = random.randint(-radius, radius)
-            # Evitar el centro (donde está el hogar)
-            if abs(x) < 5 and abs(y) < 5: continue
-            
-            char = random.choice(["♣", "♣", "▲", "✿", "▒", "."])
-            self.decorations[(x, y)] = char
+    def get_biome_at(self, x: float, y: float) -> str:
+        return self.scenario.get_biome_id(x, y)
+
+    def get_ground_char(self, x: int, y: int) -> str:
+        biome_id = self.get_biome_at(x, y)
+        return self.scenario.get_ground_char(biome_id)
+
+    def get_biome_stats(self, x: float, y: float) -> dict:
+        biome_id = self.get_biome_at(x, y)
+        return self.scenario.get_biome_stats(biome_id)
+
+    def update_time(self, dt: float):
+        self.time_of_day += (dt * 0.1)
+        if self.time_of_day >= 24.0: self.time_of_day = 0.0
+
+    def is_night(self) -> bool:
+        return self.time_of_day > 20.0 or self.time_of_day < 6.0
 
     def add_entity(self, entity: Entity):
         self.entities[entity.id] = entity
-
-    def remove_entity(self, entity_id: UUID):
-        if entity_id in self.entities:
-            del self.entities[entity_id]
 
     def get_all_entities(self) -> List[Entity]:
         return list(self.entities.values())
 
     def update_all(self, delta_time: float):
+        self.update_time(delta_time)
         for entity in self.entities.values():
             entity.update(delta_time)
