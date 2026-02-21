@@ -1,69 +1,68 @@
 import random
+import math
 from typing import Dict, Tuple, Any, List
 from .base import BaseScenario
 
 class UrbanScenario(BaseScenario):
     name = "Urban"
     
-    # Definición de biomas con magnitudes reales
     biomes_def = {
         "STREET": {"char": "#", "solid": False, "speed_mult": 1.8, "stress_mod": 1, "pair_id": 14},
         "SIDEWALK": {"char": ".", "solid": False, "speed_mult": 1.0, "stress_mod": 0, "pair_id": 15},
         "WALL": {"char": "X", "solid": True, "speed_mult": 0, "stress_mod": 0, "pair_id": 5},
         "INTERIOR": {"char": " ", "solid": False, "speed_mult": 0.6, "stress_mod": -2, "pair_id": 16},
-        "PARK": {"char": "v", "solid": False, "speed_mult": 1.0, "stress_mod": -3, "pair_id": 17}
+        "PARK": {"char": "v", "solid": False, "speed_mult": 1.0, "stress_mod": -3, "pair_id": 17},
+        "CONSTRUCTION": {"char": "!", "solid": True, "speed_mult": 0, "stress_mod": 0, "pair_id": 13} # Amarillo
     }
     
     legend_def = [
-        ("X", "MURO DE EDIFICIO", 5), ("+", "PUERTA DE ACCESO", 4),
-        ("#", "CALZADA (Coches)", 14), (".", "ACERA (Peatones)", 15),
-        (" ", "INTERIOR (Oficinas)", 16), ("v", "PARQUE", 17)
+        ("X", "MURO", 5), ("+", "PUERTA", 4), ("!", "OBRAS", 13),
+        ("#", "CALLE", 14), (".", "ACERA", 15), ("v", "PARQUE", 17)
     ]
 
     def get_biome_id(self, x: float, y: float) -> str:
-        # Rejilla de 40 unidades para una manzana real
-        bx, by = int(x) % 40, int(y) % 40
+        # Distritos: Centro (Comercial), Periferia (Parques), Zonas Industriales
+        dist = math.sqrt(x**2 + y**2)
         
-        # 1. Calles (Asfalto) - 8 unidades de ancho
-        if bx < 8 or by < 8:
+        # 1. Parques Metropolitanos en la periferia
+        if dist > 120: return "PARK"
+        
+        # 2. Rejilla de manzanas (Blocks)
+        bx, by = int(x) % 50, int(y) % 50
+        
+        # Calles más anchas en avenidas principales
+        street_width = 10 if (int(x)//50) % 3 == 0 else 6
+        
+        if bx < street_width or by < street_width:
             return "STREET"
-            
-        # 2. Aceras - 2 unidades a cada lado de la calle
-        if bx < 10 or bx >= 38 or by < 10 or by >= 38:
+        if bx < street_width + 2 or bx >= 48 or by < street_width + 2 or by >= 48:
             return "SIDEWALK"
             
-        # 3. Manzana de Edificios (10 a 38)
-        # Dejamos 2 unidades de "pavement" antes del muro
-        if bx < 12 or bx >= 36 or by < 12 or by >= 36:
-            return "SIDEWALK"
-            
-        # 4. El Edificio (12 a 36)
-        # Muros
-        if bx == 12 or bx == 35 or by == 12 or by == 35:
+        # 3. Zonas en Construcción aleatorias
+        if (int(x)//50 + int(y)//50) % 7 == 0:
+            if bx > 20 and by > 20 and bx < 30 and by < 30:
+                return "CONSTRUCTION"
+
+        # 4. Edificios
+        if bx == street_width + 2 or bx == 47 or by == street_width + 2 or by == 47:
             return "WALL"
             
-        # Interior
         return "INTERIOR"
 
     def is_door(self, x: int, y: int) -> bool:
-        """Puertas en el centro de la fachada sur de cada edificio (Y=35)."""
-        bx, by = x % 40, y % 40
-        # Puerta en el centro de la pared sur (by=35) de la manzana
-        if by == 35 and bx == 24:
-            return True
+        bx, by = x % 50, y % 50
+        # Puerta en el centro de la fachada
+        if by == 47 and bx == 25: return True
         return False
 
-    def is_walkable(self, x: float, y: float) -> bool:
-        bx, by = int(x), int(y)
-        if self.is_door(bx, by): return True
-        biome = self.get_biome_id(x, y)
-        return not self.biomes_def[biome].get("solid", False)
+    def get_home_coords(self) -> Tuple[int, int]:
+        return (24, 24) # Centro del edificio inicial en la manzana 40x40
 
     def generate_decorations(self, radius: int) -> Dict[Tuple[int, int], str]:
         decorations = {}
-        # Decoraciones básicas: Puertas y algún detalle en aceras
-        for x in range(-radius, radius, 40):
-            for y in range(-radius, radius, 40):
-                # Puerta sur del edificio de esta manzana
-                decorations[(x + 24, y + 35)] = "+"
+        for x in range(-radius, radius, 50):
+            for y in range(-radius, radius, 50):
+                decorations[(x + 25, y + 47)] = "+" # Puertas
+                if random.random() < 0.3:
+                    decorations[(x + 10, y + 10)] = "o" # Papeleras
         return decorations

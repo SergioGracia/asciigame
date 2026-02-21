@@ -6,7 +6,10 @@ from .event_manager import EventManager
 from .entities.person import Person
 from .entities.wolf import Wolf
 from .entities.town import Town
+from .entities.shop import Shop
 from .logger import logger
+
+from .event_registry import EventRegistry
 
 class SimulationEngine:
     def __init__(self, world_state: WorldState, fps: int = 20):
@@ -16,9 +19,10 @@ class SimulationEngine:
         self.is_running = False
         self.render_callbacks: List[Callable[[WorldState], None]] = []
         self.event_manager = EventManager(world_state)
+        self.event_registry = EventRegistry() # NUEVO: Registro de eventos masivos
         
         self.last_logic_tick = 0
-        self.logic_interval = 2.0 
+        self.logic_interval = 0.5 # TURBO: Decisiones cada medio segundo
 
     def register_render_callback(self, callback: Callable[[WorldState], None]):
         self.render_callbacks.append(callback)
@@ -33,13 +37,24 @@ class SimulationEngine:
         people = [e for e in entities if isinstance(e, Person)]
         wolves = [e for e in entities if isinstance(e, Wolf)]
         towns = [e for e in entities if isinstance(e, Town)]
+        shops = [e for e in entities if isinstance(e, Shop)]
 
         # 1. PERSONAS vs LOBOS (Pánico)
         for p in people:
-            for w in wolves:
-                dist = math.sqrt((p.x - w.x)**2 + (p.y - w.y)**2)
-                if dist < 5.0:
-                    p.react_to_danger(w.x, w.y)
+            # Proteccion: si está en un camino con vallas cercanas, el lobo no le ve
+            is_protected = False
+            px, py = int(p.x), int(py := p.y)
+            if (px, py) in self.world_state.built_structures:
+                # Comprobamos si hay vallas adyacentes (perímetro de seguridad)
+                for dx, dy in [(0,1), (0,-1), (1,0), (-1,0)]:
+                    if self.world_state.built_structures.get((px+dx, py+dy), {}).get("type") == "FENCE":
+                        is_protected = True; break
+            
+            if not is_protected:
+                for w in wolves:
+                    dist = math.sqrt((p.x - w.x)**2 + (p.y - w.y)**2)
+                    if dist < 5.0:
+                        p.react_to_danger(w.x, w.y)
 
         # 2. PERSONAS vs PERSONAS (Social)
         for i, p1 in enumerate(people):
@@ -49,7 +64,14 @@ class SimulationEngine:
                     p1.social_interaction(p2)
                     p2.social_interaction(p1)
 
-        # 3. PERSONAS vs TOWN (Entrega de recursos)
+        # 3. PERSONAS vs SHOP (Compras)
+        for p in people:
+            for s in shops:
+                dist = math.sqrt((p.x - s.x)**2 + (p.y - s.y)**2)
+                if dist < 2.0:
+                    s.interact(p)
+
+        # 4. PERSONAS vs TOWN (Entrega de recursos)
         for p in people:
             for t in towns:
                 dist = math.sqrt((p.x - t.x)**2 + (p.y - t.y)**2)
@@ -77,9 +99,9 @@ class SimulationEngine:
                 for entity in self.world_state.get_all_entities():
                     if isinstance(entity, Person):
                         biome = self.world_state.get_biome_at(entity.x, entity.y)
-                        entity.update(dt, biome, scenario)
+                        entity.update(dt, biome, scenario, self.world_state) # Pasamos world_state
                     elif isinstance(entity, Wolf):
-                        entity.update(dt, is_night, scenario)
+                        entity.update(dt, is_night, self.world_state)
                     else:
                         entity.update(dt)
 
@@ -87,6 +109,14 @@ class SimulationEngine:
                 if current_time - self.last_logic_tick > self.logic_interval:
                     self._handle_world_interactions()
                     self.event_manager.update()
+                    
+                    # NUEVO: Disparar eventos contextuales
+                    people = [e for e in self.world_state.get_all_entities() if isinstance(e, Person)]
+                    for p in people:
+                        events = self.event_registry.get_random_event(p, self.world_state) # Pasamos self.world_state
+                        for ev in events:
+                            self.event_registry.apply_event(p, ev)
+
                     self.world_state.tick_count += 1
                     self.last_logic_tick = current_time
 

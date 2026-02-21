@@ -3,27 +3,62 @@ from uuid import UUID
 import random
 from .entities.base import Entity
 from .scenarios.base import BaseScenario
+from .entities.town import Town
 
 class WorldState:
-    """Mundo cuyo comportamiento depende del escenario activo."""
     def __init__(self, scenario: BaseScenario):
         self.scenario = scenario
         self.entities: Dict[UUID, Entity] = {}
         self.tick_count: int = 0
         self.time_of_day = 12.0
-        # El escenario genera el mapa
         self.decorations = self.scenario.generate_decorations(radius=150)
+        self.built_structures: Dict[Tuple[int, int], Dict] = {}
 
-    def get_biome_at(self, x: float, y: float) -> str:
-        return self.scenario.get_biome_id(x, y)
+    def add_structure(self, x: int, y: int, struct_type: str):
+        if struct_type == "BRIDGE":
+            self.built_structures[(x, y)] = {"char": "=", "solid": False, "type": "BRIDGE"}
+        elif struct_type == "ROAD":
+            self.built_structures[(x, y)] = {"char": ":", "solid": False, "type": "ROAD"}
+        elif struct_type == "FENCE":
+            self.built_structures[(x, y)] = {"char": "#", "solid": True, "type": "FENCE"}
+
+    def is_walkable(self, x: float, y: float) -> bool:
+        bx, by = int(x), int(y)
+        
+        # 1. Comprobar si hay un edificio (Town) en esa posición
+        for entity in self.entities.values():
+            if isinstance(entity, Town):
+                tile = entity.get_tile_at(bx, by)
+                if tile: return not tile["solid"]
+
+        # 2. Construcciones manuales
+        if (bx, by) in self.built_structures:
+            return not self.built_structures[(bx, by)]["solid"]
+        
+        # 3. Escenario base
+        return self.scenario.is_walkable(x, y)
 
     def get_ground_char(self, x: int, y: int) -> str:
-        biome_id = self.get_biome_at(x, y)
+        # 1. Prioridad: Edificios complejos (Town)
+        for entity in self.entities.values():
+            if isinstance(entity, Town):
+                tile = entity.get_tile_at(x, y)
+                if tile: return tile["char"]
+
+        # 2. Construcciones manuales
+        if (x, y) in self.built_structures:
+            return self.built_structures[(x, y)]["char"]
+        
+        # 3. Escenario base
+        biome_id = self.scenario.get_biome_id(x, y)
         return self.scenario.get_ground_char(biome_id)
 
-    def get_biome_stats(self, x: float, y: float) -> dict:
-        biome_id = self.get_biome_at(x, y)
-        return self.scenario.get_biome_stats(biome_id)
+    def get_biome_at(self, x: float, y: float) -> str:
+        # Si está dentro de un edificio, el bioma es INTERIOR para recuperar energía
+        for entity in self.entities.values():
+            if isinstance(entity, Town) and entity.is_inside(x, y):
+                return "INTERIOR"
+        return self.scenario.get_biome_id(x, y)
 
     def update_time(self, dt: float):
         self.time_of_day += (dt * 0.1)
@@ -33,6 +68,9 @@ class WorldState:
         return self.time_of_day > 20.0 or self.time_of_day < 6.0
 
     def add_entity(self, entity: Entity):
+        # Evitar spawn en muros de Town
+        if not self.is_walkable(entity.x, entity.y):
+            entity.x += 2; entity.y += 2
         self.entities[entity.id] = entity
 
     def get_all_entities(self) -> List[Entity]:

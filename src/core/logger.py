@@ -1,11 +1,12 @@
 from datetime import datetime
 from typing import List
+from .storyteller import Storyteller
 
 class GameLogger:
     def __init__(self, max_lines: int = 30):
         self.logs: List[str] = []
         self.max_lines = max_lines
-        # Mapeo de emojis a texto ASCII para evitar romper curses
+        self.storyteller = Storyteller()
         self.emoji_map = {
             "⚖️": "COURT", "🕵️": "TAX", "😱": "ALARM", "✨": "GOLD", 
             "🤝": "GIFT", "💬": "TALK", "🌈": "GOOD", "💥": "CRISIS", 
@@ -15,12 +16,15 @@ class GameLogger:
         }
 
     def log(self, message: str):
-        # Limpiar emojis del mensaje
+        # 1. Limpieza de emojis
         for emoji, text in self.emoji_map.items():
             message = message.replace(emoji, text)
             
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        formatted_msg = f"[{timestamp}] {message}"
+        # 2. Narración (Embellecimiento)
+        narrated_message = self.storyteller.narrate(message)
+            
+        timestamp = datetime.now().strftime("%H:%M")
+        formatted_msg = f"[{timestamp}] {narrated_message}"
         self.logs.append(formatted_msg)
         if len(self.logs) > self.max_lines:
             self.logs.pop(0)
