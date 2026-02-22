@@ -24,8 +24,10 @@ class Pathfinder:
         heapq.heappush(open_set, (0, (sx, sy)))
         came_from = {}
         g_score = {(sx, sy): 0}
+        steps = 0
         
-        while open_set:
+        while open_set and steps < max_steps:
+            steps += 1
             current = heapq.heappop(open_set)[1]
             if current == (ex, ey):
                 return self._reconstruct_path(came_from, current)

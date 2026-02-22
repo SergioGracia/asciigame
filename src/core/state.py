@@ -9,6 +9,7 @@ class WorldState:
     def __init__(self, scenario: BaseScenario):
         self.scenario = scenario
         self.entities: Dict[UUID, Entity] = {}
+        self.towns: List[Town] = [] # CACHE DE EDIFICIOS
         self.tick_count: int = 0
         self.time_of_day = 12.0
         self.decorations = self.scenario.generate_decorations(radius=150)
@@ -25,11 +26,10 @@ class WorldState:
     def is_walkable(self, x: float, y: float) -> bool:
         bx, by = int(x), int(y)
         
-        # 1. Comprobar si hay un edificio (Town) en esa posición
-        for entity in self.entities.values():
-            if isinstance(entity, Town):
-                tile = entity.get_tile_at(bx, by)
-                if tile: return not tile["solid"]
+        # 1. Comprobar si hay un edificio (Town) en esa posición (USANDO CACHE)
+        for town in self.towns:
+            tile = town.get_tile_at(bx, by)
+            if tile: return not tile["solid"]
 
         # 2. Construcciones manuales
         if (bx, by) in self.built_structures:
@@ -40,10 +40,9 @@ class WorldState:
 
     def get_ground_char(self, x: int, y: int) -> str:
         # 1. Prioridad: Edificios complejos (Town)
-        for entity in self.entities.values():
-            if isinstance(entity, Town):
-                tile = entity.get_tile_at(x, y)
-                if tile: return tile["char"]
+        for town in self.towns:
+            tile = town.get_tile_at(x, y)
+            if tile: return tile["char"]
 
         # 2. Construcciones manuales
         if (x, y) in self.built_structures:
@@ -55,8 +54,8 @@ class WorldState:
 
     def get_biome_at(self, x: float, y: float) -> str:
         # Si está dentro de un edificio, el bioma es INTERIOR para recuperar energía
-        for entity in self.entities.values():
-            if isinstance(entity, Town) and entity.is_inside(x, y):
+        for town in self.towns:
+            if town.is_inside(x, y):
                 return "INTERIOR"
         return self.scenario.get_biome_id(x, y)
 
@@ -70,8 +69,11 @@ class WorldState:
     def add_entity(self, entity: Entity):
         # Evitar spawn en muros de Town
         if not self.is_walkable(entity.x, entity.y):
-            entity.x += 2; entity.y += 2
+            entity.x += 2.0; entity.y += 2.0
+            
         self.entities[entity.id] = entity
+        if isinstance(entity, Town):
+            self.towns.append(entity)
 
     def get_all_entities(self) -> List[Entity]:
         return list(self.entities.values())

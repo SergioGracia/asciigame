@@ -12,7 +12,7 @@ from .logger import logger
 from .event_registry import EventRegistry
 
 class SimulationEngine:
-    def __init__(self, world_state: WorldState, fps: int = 20):
+    def __init__(self, world_state: WorldState, fps: int = 15):
         self.world_state = world_state
         self.fps = fps
         self.frame_time = 1.0 / fps
@@ -29,21 +29,24 @@ class SimulationEngine:
 
     def _notify_renderers(self):
         for callback in self.render_callbacks:
-            callback(self.world_state)
+            try:
+                callback(self.world_state)
+            except Exception as e:
+                logger.log(f"RENDER ERROR: {str(e)}")
 
     def _handle_world_interactions(self):
         """Gestiona interacciones entre entidades (Peligros, Social, Town)."""
         entities = self.world_state.get_all_entities()
         people = [e for e in entities if isinstance(e, Person)]
         wolves = [e for e in entities if isinstance(e, Wolf)]
-        towns = [e for e in entities if isinstance(e, Town)]
+        towns = self.world_state.towns
         shops = [e for e in entities if isinstance(e, Shop)]
 
         # 1. PERSONAS vs LOBOS (Pánico)
         for p in people:
             # Proteccion: si está en un camino con vallas cercanas, el lobo no le ve
             is_protected = False
-            px, py = int(p.x), int(py := p.y)
+            px, py = int(p.x), int(p.y)
             if (px, py) in self.world_state.built_structures:
                 # Comprobamos si hay vallas adyacentes (perímetro de seguridad)
                 for dx, dy in [(0,1), (0,-1), (1,0), (-1,0)]:
@@ -87,47 +90,64 @@ class SimulationEngine:
         
         try:
             while self.is_running:
-                current_time = time.time()
-                dt = current_time - start_time
-                start_time = current_time
+                loop_start = time.time()
+                dt = loop_start - start_time
+                start_time = loop_start
+
+                # Limitar dt para evitar saltos locos tras bloqueos
+                dt = min(dt, 0.1)
 
                 # 1. Movimiento (Física) y Tiempo Global
                 self.world_state.update_time(dt) 
                 is_night = self.world_state.is_night()
                 scenario = self.world_state.scenario # Obtenemos el escenario
                 
-                for entity in self.world_state.get_all_entities():
-                    if isinstance(entity, Person):
-                        biome = self.world_state.get_biome_at(entity.x, entity.y)
-                        entity.update(dt, biome, scenario, self.world_state) # Pasamos world_state
-                    elif isinstance(entity, Wolf):
-                        entity.update(dt, is_night, self.world_state)
-                    else:
-                        entity.update(dt)
+                entities = self.world_state.get_all_entities()
+                for entity in entities:
+                    try:
+                        if isinstance(entity, Person):
+                            biome = self.world_state.get_biome_at(entity.x, entity.y)
+                            entity.update(dt, biome, scenario, self.world_state) # Pasamos world_state
+                        elif isinstance(entity, Wolf):
+                            entity.update(dt, is_night, self.world_state)
+                        else:
+                            entity.update(dt)
+                    except Exception as e:
+                        logger.log(f"ENTITY ERROR ({entity.name}): {str(e)}")
 
                 # 2. Lógica y Eventos
-                if current_time - self.last_logic_tick > self.logic_interval:
-                    self._handle_world_interactions()
-                    self.event_manager.update()
-                    
-                    # NUEVO: Disparar eventos contextuales
-                    people = [e for e in self.world_state.get_all_entities() if isinstance(e, Person)]
-                    for p in people:
-                        events = self.event_registry.get_random_event(p, self.world_state) # Pasamos self.world_state
-                        for ev in events:
-                            self.event_registry.apply_event(p, ev)
+                if loop_start - self.last_logic_tick > self.logic_interval:
+                    try:
+                        self._handle_world_interactions()
+                        self.event_manager.update()
+                        
+                        # NUEVO: Disparar eventos contextuales
+                        people = [e for e in entities if isinstance(e, Person)]
+                        for p in people:
+                            events = self.event_registry.get_random_event(p, self.world_state) # Pasamos self.world_state
+                            for ev in events:
+                                self.event_registry.apply_event(p, ev)
+                    except Exception as e:
+                        logger.log(f"LOGIC ERROR: {str(e)}")
 
                     self.world_state.tick_count += 1
-                    self.last_logic_tick = current_time
+                    self.last_logic_tick = loop_start
 
                 # 3. Render
                 self._notify_renderers()
                 
-                sleep_time = self.frame_time - (time.time() - current_time)
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
+                # Sleep dinámico pero seguro
+                elapsed = time.time() - loop_start
+                sleep_time = max(0.005, self.frame_time - elapsed)
+                time.sleep(sleep_time)
                     
         except KeyboardInterrupt:
+            self.stop()
+        except Exception as e:
+            # Guardar el error antes de salir
+            with open("crash_log.txt", "w") as f:
+                import traceback
+                f.write(traceback.format_exc())
             self.stop()
 
     def stop(self):

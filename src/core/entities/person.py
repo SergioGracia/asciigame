@@ -24,35 +24,41 @@ class Person(Entity):
         self.pathfinder = None
         self.action_timer = 0.0
         self.social_cooldown = 0.0
+        self.path_retry_timer = 0.0 # NUEVO: Tiempo para reintentar ruta
         self.current_biome = "MEADOW"
         self.home_reference = None
         self.last_road_pos = (None, None)
         self.is_constructing = False 
 
     def move_towards(self, tx, ty):
-        self.target_x, self.target_y = tx, ty
-        self.path = []
+        if (self.target_x, self.target_y) != (tx, ty):
+            self.target_x, self.target_y = tx, ty
+            self.path = []
+            self.path_retry_timer = 0.0
 
     def update(self, dt: float, biome: str = "MEADOW", scenario=None, world_state=None):
         self.current_biome = biome
         
         # 1. SEGURIDAD: Si está en terreno prohibido, rescatarlo
         if world_state and not world_state.is_walkable(self.x, self.y):
-            self.x, self.y = 0, 0 # Rescate a base
+            self.x, self.y = 0.0, 0.0 # Rescate a base
             self.path = []
 
         # 2. METABOLISMO
         if self.state == "RESTING" or biome == "INTERIOR":
-            self.energy = min(100, self.energy + 15.0 * dt)
-            self.stress = max(0, self.stress - 10.0 * dt)
+            self.energy = min(100.0, self.energy + 15.0 * dt)
+            self.stress = max(0.0, self.stress - 10.0 * dt)
             self.speed = self.base_speed * 0.5
         else:
-            self.energy = max(0, self.energy - 0.5 * dt)
+            self.energy = max(0.0, self.energy - 0.5 * dt)
             speed_mod = 2.0 if world_state and (int(self.x), int(self.y)) in world_state.built_structures else 1.0
             self.speed = self.base_speed * speed_mod
 
         # 3. MOVIMIENTO ORTOGONAL ESTRICTO
-        if world_state: self._follow_path_orthogonal(dt, world_state)
+        if world_state:
+            if self.path_retry_timer > 0:
+                self.path_retry_timer -= dt
+            self._follow_path_orthogonal(dt, world_state)
         
         # 4. LÓGICA DE IA
         self.action_timer += dt
@@ -62,9 +68,14 @@ class Person(Entity):
 
     def _follow_path_orthogonal(self, dt, world_state):
         if not self.path:
+            if self.path_retry_timer > 0: return # Enfriamiento activo
+            
             if not self.pathfinder: self.pathfinder = Pathfinder(world_state)
             self.path = self.pathfinder.get_path((self.x, self.y), (self.target_x, self.target_y))
-            if not self.path: return
+            
+            if not self.path:
+                self.path_retry_timer = 2.0 # Si falla, esperar 2 segundos
+                return
 
         target_node = self.path[0]
         dx = target_node[0] - self.x

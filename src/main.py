@@ -20,60 +20,82 @@ from src.core.logger import logger
 from src.core.scenarios.nature import NatureScenario
 from src.core.scenarios.urban import UrbanScenario
 
+from src.core.scenarios.nature import NatureScenario
+from src.core.scenarios.urban import UrbanScenario
+from src.core.scenarios.cave import CaveScenario
+
 def main(stdscr):
     """Bucle principal gestionado por curses."""
     
-    # ---------------------------------------------------------
-    # ESCENARIO ACTIVO: NATURE (Bosque)
-    scenario = NatureScenario()
-    # ---------------------------------------------------------
+    # 1. ESTADO DE ESCENARIOS
+    surface_scenario = NatureScenario()
+    cave_scenario = None # Se generará al entrar
+    active_scenario = surface_scenario
+    
+    world = WorldState(active_scenario)
+    
+    # Posición guardada en la superficie
+    surface_pos = (0.0, 0.0)
+    
+    # 2. Punto de Foco Cámara (Tienda solitaria)
+    focus_point = Shop(0, 0)
+    world.add_entity(focus_point)
 
-    world = WorldState(scenario)
-    
-    # 1. Base / Hogar
-    hx, hy = 0, 0
-    home = Town("Hogar Central", x=hx, y=hy)
-    world.add_entity(home)
-    
-    # 2. Tienda
-    shop = Shop(hx + 10, hy + 10)
-    world.add_entity(shop)
-
-    # 3. Peligros (Lobos)
-    for i in range(3):
-        wx, wy = random.uniform(-80, 80), random.uniform(-80, 80)
-        world.add_entity(Wolf(f"Lobo {i}", x=wx, y=wy))
-    
-    # 4. Población MASIVA (8 Personajes para pruebas rápidas)
-    nombres = ["Juan", "Maria", "Pedro", "Lucia", "Diego", "Ana", "Luis", "Elena"]
-    for i, nombre in enumerate(nombres):
-        # Repartirlos por el mapa
-        px = random.uniform(-30, 30)
-        py = random.uniform(-30, 30)
-        p = Person(nombre, x=px, y=py, goal=random.choice(["BUILDER", "TRADER"]))
-        p.inventory["wood"] = 10 # Empiezan con recursos
-        if nombre == "Juan": p.is_leader = True
-        world.add_entity(p)
-    
-    # 5. Motor y Renderer
-    engine = SimulationEngine(world, fps=20)
+    # 3. Motor y Renderer
+    engine = SimulationEngine(world, fps=15)
     renderer = CursesRenderer(stdscr)
+    renderer.camera_focus = focus_point
     
     def wrapped_renderer(ws):
+        nonlocal active_scenario, cave_scenario, surface_pos
         renderer.render(ws)
         stdscr.nodelay(True)
         key = stdscr.getch()
         
+        # MOVIMIENTO DE CÁMARA
+        move_speed = 5.0 * renderer.zoom
+        if key in [ord('w'), ord('W'), curses.KEY_UP]:
+            focus_point.y -= move_speed
+        elif key in [ord('s'), ord('S'), curses.KEY_DOWN]:
+            focus_point.y += move_speed
+        elif key in [ord('a'), ord('A'), curses.KEY_LEFT]:
+            focus_point.x -= move_speed
+        elif key in [ord('d'), ord('D'), curses.KEY_RIGHT]:
+            focus_point.x += move_speed
+            
+        # ACCIÓN ESPECIAL: ENTRAR / SALIR (E)
+        if key in [ord('e'), ord('E')]:
+            # Comprobar qué hay bajo los pies
+            char = active_scenario.get_ground_char(int(focus_point.x), int(focus_point.y), 
+                                                active_scenario.get_biome_id(focus_point.x, focus_point.y))
+            
+            if char == "0":
+                if active_scenario == surface_scenario:
+                    # ENTRAR A CUEVA
+                    logger.log("DESCEND: Entrando a las profundidades...")
+                    surface_pos = (focus_point.x, focus_point.y)
+                    cave_scenario = CaveScenario(seed=surface_scenario.seed + int(focus_point.x + focus_point.y))
+                    active_scenario = cave_scenario
+                    ws.scenario = active_scenario
+                    focus_point.x, focus_point.y = 0, 0 # Empezar en el centro del submundo
+                else:
+                    # SALIR A SUPERFICIE
+                    logger.log("ASCEND: Volviendo a la superficie...")
+                    active_scenario = surface_scenario
+                    ws.scenario = active_scenario
+                    focus_point.x, focus_point.y = surface_pos[0], surface_pos[1]
+
         if key == ord('q') or key == ord('Q'):
             engine.stop()
         elif key == ord('s') or key == ord('S'):
             PersistenceManager.save_game(world)
             logger.log("SYS: Partida guardada correctamente.")
-        elif key == ord('n') or key == ord('N'):
-            people = [e for e in ws.get_all_entities() if isinstance(e, Person)]
-            if renderer.camera_focus in people:
-                idx = (people.index(renderer.camera_focus) + 1) % len(people)
-                renderer.camera_focus = people[idx]
+        elif key in [ord('+'), ord('=')]:
+            renderer.zoom = max(0.1, renderer.zoom * 0.8)
+            logger.log(f"ZOOM: Acercando (x{1.0/renderer.zoom:.1f})")
+        elif key in [ord('-'), ord('_')]:
+            renderer.zoom = min(50.0, renderer.zoom * 1.2)
+            logger.log(f"ZOOM: Alejando (x{1.0/renderer.zoom:.1f})")
         elif key == ord('h') or key == ord('H'):
             renderer.toggle_legend()
 
